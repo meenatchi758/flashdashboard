@@ -1,7 +1,9 @@
-from extensions import db
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
 
-class Sales(db.Model):
+db = SQLAlchemy()
+
+class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
-    product = db.Column(db.String(100))
-    quantity = db.Column(db.Integer)
-    total = db.Column(db.Float)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)

@@ -1,65 +1,78 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_sqlalchemy import SQLAlchemy
-import datetime
+from flask_bcrypt import Bcrypt
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user, UserMixin
+import random
 
 app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///dashboard.db"
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config['SECRET_KEY'] = 'supersecretkey'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///dashboard.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
 db = SQLAlchemy(app)
+bcrypt = Bcrypt(app)
 
-# Models
-class Product(db.Model):
+# Flask-Login setup
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+
+# User model
+class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    price = db.Column(db.Float, nullable=False)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
 
-class Sale(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    product = db.Column(db.String(100), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
-    total = db.Column(db.Float, nullable=False)
-    date = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+# Load user callback
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
-# Create tables before first request
+# Login page
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        print("Login submitted")
+        username = request.form['username']
+        password = request.form['password']
+        user = User.query.filter_by(username=username).first()
 
+        if user and bcrypt.check_password_hash(user.password, password):
+            print("Login success")
+            login_user(user)
+            next_page = request.args.get('next')
+            return redirect(next_page) if next_page else redirect(url_for('dashboard'))
+        else:
+            print("Login failed")
+            flash("Invalid username or password")
+    return render_template('login.html')
+
+# Logout route
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
 
 # Dashboard route
-@app.route("/", methods=["GET", "POST"])
+@app.route('/')
+@login_required
 def dashboard():
-    if request.method == "POST":
-        # Add Product
-        if 'product_name' in request.form:
-            name = request.form.get("product_name")
-            price = float(request.form.get("product_price"))
-            new_product = Product(name=name, price=price)
-            db.session.add(new_product)
-            db.session.commit()
-        # Add Sale
-        elif 'sale_product' in request.form:
-            product = request.form.get("sale_product")
-            quantity = int(request.form.get("sale_quantity"))
-            total = float(request.form.get("sale_total"))
-            new_sale = Sale(product=product, quantity=quantity, total=total)
-            db.session.add(new_sale)
-            db.session.commit()
+    stats = {
+        'users': User.query.count(),
+        'sales': random.randint(100, 1000),
+        'visits': random.randint(1000, 5000)
+    }
+    chart_data = [random.randint(10, 100) for _ in range(7)]
+    return render_template('dashboard.html', stats=stats, chart_data=chart_data)
 
-        return redirect(url_for("dashboard"))
-
-    products = Product.query.all()
-    sales = Sale.query.all()
-
-    total_sales = sum(s.total for s in sales)
-    total_products = len(products)
-
-    chart_labels = [s.product for s in sales]
-    chart_values = [s.total for s in sales]
-
-    return render_template("dashboard.html", products=products, sales=sales,
-                           totals={"total_sales": total_sales, "total_products": total_products},
-                           chart_labels=chart_labels, chart_values=chart_values)
-
-if __name__ == "__main__":
+# Create DB and admin user on first run
+if __name__ == '__main__':
     with app.app_context():
-        db.create_all()  # ✅ Create tables manually without @before_first_request
+        db.create_all()
+        admin = User.query.filter_by(username='admin').first()
+        if not admin:
+            print("Creating default admin user")
+            hashed_pw = bcrypt.generate_password_hash('admin').decode('utf-8')
+            db.session.add(User(username='admin', password=hashed_pw))
+            db.session.commit()
     app.run(debug=True)
-
